@@ -3,62 +3,49 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
-function randomColor() {
-  return Math.floor(Math.random() * 0xffffff);
+// One colour per floor, keyed by the _wN group name (case-insensitive).
+// Add or change entries here as you add floors in Blender.
+const FLOOR_PALETTE: Record<string, number> = {
+  _w2: 0xe8735a, // floor 2 — coral
+  _w3: 0x4a9e8a, // floor 3 — teal
+  _w4: 0xd4a84b, // floor 4 — gold
+  _w5: 0x7b6eb0, // floor 5 — lavender
+};
+const FALLBACK_COLOR = 0x8a9ba8;
+
+// Walk the parent chain to find the nearest _wN ancestor and return its colour.
+function floorColor(obj: THREE.Object3D): number {
+  let node: THREE.Object3D | null = obj;
+  while (node) {
+    const color = FLOOR_PALETTE[node.name.toLowerCase()];
+    if (color !== undefined) return color;
+    node = node.parent;
+  }
+  return FALLBACK_COLOR;
 }
 
-function extractShapeFromFlatGeometry(geometry: THREE.BufferGeometry): THREE.Shape | null {
-  const posAttr = geometry.attributes.position;
-  const index = geometry.index;
-  if (!posAttr || !index) return null;
+const EDGE_MAT = new THREE.LineBasicMaterial({ color: 0x1a1a1a });
 
-  // Find boundary edges — those belonging to exactly one triangle
-  const edgeMap = new Map<string, { count: number; verts: [number, number] }>();
-  for (let i = 0; i < index.count; i += 3) {
-    const tri = [index.getX(i), index.getX(i + 1), index.getX(i + 2)];
-    for (let j = 0; j < 3; j++) {
-      const v1 = tri[j], v2 = tri[(j + 1) % 3];
-      const key = `${Math.min(v1, v2)}_${Math.max(v1, v2)}`;
-      const entry = edgeMap.get(key);
-      if (entry) entry.count++;
-      else edgeMap.set(key, { count: 1, verts: [v1, v2] });
-    }
-  }
-
-  const adj = new Map<number, number[]>();
-  for (const { count, verts: [v1, v2] } of edgeMap.values()) {
-    if (count !== 1) continue;
-    adj.has(v1) ? adj.get(v1)!.push(v2) : adj.set(v1, [v2]);
-    adj.has(v2) ? adj.get(v2)!.push(v1) : adj.set(v2, [v1]);
-  }
-
-  if (adj.size === 0) return null;
-
-  // Walk the boundary loop
-  const loop: number[] = [];
-  const visited = new Set<number>();
-  const firstKey = adj.keys().next().value;
-  if (firstKey === undefined) return null;
-  let cur: number = firstKey;
-  while (!visited.has(cur)) {
-    loop.push(cur);
-    visited.add(cur);
-    const next = (adj.get(cur) ?? []).find(n => !visited.has(n));
-    if (next === undefined) break;
-    cur = next;
-  }
-
-  if (loop.length < 3) return null;
-
-  // Build shape in XZ plane (Z negated so rotation.x = -π/2 restores correct orientation)
-  const shape = new THREE.Shape();
-  loop.forEach((v, i) => {
-    const x = posAttr.getX(v);
-    const z = -posAttr.getZ(v);
-    i === 0 ? shape.moveTo(x, z) : shape.lineTo(x, z);
+// Apply a floor-tinted standard material to a mesh and add an edge overlay.
+// Works for both flat planes (current GLB) and pre-extruded 3D geometry from Blender.
+function applyRoomMaterial(mesh: THREE.Mesh) {
+  mesh.material = new THREE.MeshStandardMaterial({
+    color: floorColor(mesh),
+    transparent: true,
+    opacity: 0.82,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1,
   });
-  shape.closePath();
-  return shape;
+  mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry), EDGE_MAT));
+}
+
+// Make any Line/LineSegments exported from Blender visible with a neutral material.
+// Once you pre-extrude walls this will become dead code, but costs nothing to keep.
+function applyLineMaterial(line: THREE.Line) {
+  (line as THREE.Line<THREE.BufferGeometry, THREE.Material>).material =
+    new THREE.LineBasicMaterial({ color: 0x444444 });
 }
 
 export default function FloorPlan() {
@@ -69,85 +56,87 @@ export default function FloorPlan() {
     const w = mount.clientWidth;
     const h = mount.clientHeight;
 
-    // Scene
+    // ── Scene ────────────────────────────────────────────────────────────────
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xf0f0f0);
 
-    // Ortho camera — top-down view
+    // ── Camera ───────────────────────────────────────────────────────────────
     const aspect = w / h;
     const frustum = 20;
     const camera = new THREE.OrthographicCamera(
       -frustum * aspect, frustum * aspect,
-      frustum, -frustum, 0.1, 1000
+      frustum, -frustum,
+      0.1, 1000,
     );
     camera.position.set(30, 25, 30);
-    camera.lookAt(0, 1.5, 0);
+    camera.lookAt(0, 0, 0);
 
-    // Renderer
+    // ── Renderer ─────────────────────────────────────────────────────────────
     const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(w, h);
     mount.appendChild(renderer.domElement);
 
-    // Controls — left=orbit, right=pan, scroll=zoom
+    // ── Controls ─────────────────────────────────────────────────────────────
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, 1.5, 0);
     controls.screenSpacePanning = true;
     controls.update();
 
-    // Light
-    scene.add(new THREE.AmbientLight(0xffffff, 1));
+    // ── Lighting ─────────────────────────────────────────────────────────────
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+    sun.position.set(15, 30, 20);
+    scene.add(sun);
 
-    // Load GLB
+    // ── GLB ──────────────────────────────────────────────────────────────────
     const loader = new GLTFLoader();
-    loader.load("/floorplan.glb", (gltf) => {
+    loader.load("/nova-house-extruded.glb", (gltf) => {
+      // Apply materials before adding to scene so parent references are intact.
+      gltf.scene.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          applyRoomMaterial(obj);
+        } else if (obj instanceof THREE.Line) {
+          applyLineMaterial(obj);
+        }
+      });
+
       scene.add(gltf.scene);
 
-      // Extrude each flat mesh 3 m upward and color it
-      gltf.scene.traverse((obj) => {
-        if (!(obj instanceof THREE.Mesh)) return;
-
-        const shape = extractShapeFromFlatGeometry(obj.geometry);
-        if (shape) {
-          const extruded = new THREE.ExtrudeGeometry(shape, { depth: 3, bevelEnabled: false });
-          extruded.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
-          obj.geometry.dispose();
-          obj.geometry = extruded;
-        }
-
-        obj.material = new THREE.MeshStandardMaterial({
-          color: randomColor(),
-          transparent: true,
-          opacity: 0.7,
-          side: THREE.DoubleSide,
-        });
-      });
+      // Centre the camera on the loaded geometry.
+      const box = new THREE.Box3().setFromObject(gltf.scene);
+      const centre = box.getCenter(new THREE.Vector3());
+      controls.target.copy(centre);
+      camera.lookAt(centre);
+      controls.update();
     });
 
-    // Raycasting on click
+    // ── Raycaster (room picker) ───────────────────────────────────────────────
     const raycaster = new THREE.Raycaster();
-    const mouse = new THREE.Vector2();
-
+    const pointer = new THREE.Vector2();
     const onClick = (e: MouseEvent) => {
       const rect = mount.getBoundingClientRect();
-      mouse.x = ((e.clientX - rect.left) / w) * 2 - 1;
-      mouse.y = -((e.clientY - rect.top) / h) * 2 + 1;
-      raycaster.setFromCamera(mouse, camera);
-      const hits = raycaster.intersectObjects(scene.children, true);
-      if (hits.length > 0) {
-        console.log("Klikket på:", hits[0].object.name);
-      }
+      pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const hit = raycaster
+        .intersectObjects(scene.children, true)
+        .find((h) => h.object instanceof THREE.Mesh);
+      if (hit) console.log("Room:", hit.object.name, "| Floor group:", hit.object.parent?.name);
     };
     mount.addEventListener("click", onClick);
 
-    // Animate
+    // ── Render loop ──────────────────────────────────────────────────────────
+    let rafId: number;
     const animate = () => {
-      requestAnimationFrame(animate);
+      rafId = requestAnimationFrame(animate);
       controls.update();
       renderer.render(scene, camera);
     };
     animate();
 
+    // ── Cleanup ──────────────────────────────────────────────────────────────
     return () => {
+      cancelAnimationFrame(rafId);
       mount.removeEventListener("click", onClick);
       mount.removeChild(renderer.domElement);
       renderer.dispose();
