@@ -65,6 +65,7 @@ function slotBooked(room: string, day: string, hour: string): boolean {
   return s % 3 === 0;
 }
 
+
 function isRoomAvailableNow(roomName: string): boolean {
   const now = new Date();
   const day = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][now.getDay()];
@@ -181,7 +182,28 @@ export default function FloorPlan() {
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.screenSpacePanning = true;
+    controls.minPolarAngle = Math.PI / 4;      // 45° from top
+    controls.maxPolarAngle = (Math.PI * 3) / 4; // 135° from top (45° from bottom)
+    controls.autoRotate = false;
+    controls.autoRotateSpeed = 1.0;
     controls.update();
+
+    // ── Inactivity auto-rotate ────────────────────────────────────────────────
+    let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const startInactivityTimer = () => {
+      if (inactivityTimer) clearTimeout(inactivityTimer);
+      inactivityTimer = setTimeout(() => { controls.autoRotate = true; }, 7000);
+    };
+
+    const onUserActivity = () => {
+      controls.autoRotate = false;
+      startInactivityTimer();
+    };
+
+    mount.addEventListener("pointerdown", onUserActivity);
+    mount.addEventListener("wheel",       onUserActivity);
+    startInactivityTimer();
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.7));
     const sun = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -202,7 +224,7 @@ export default function FloorPlan() {
     window.addEventListener("resize", onResize);
 
     // ── GLB load ─────────────────────────────────────────────────────────────
-    new GLTFLoader().load("/nova-house-extruded.glb", (gltf) => {
+    new GLTFLoader().load(`${import.meta.env.BASE_URL}nova-house-extruded.glb`, (gltf) => {
       // Apply materials before reparenting so parent-chain colour lookup works.
       let meshIdx = 0;
       gltf.scene.traverse((obj) => {
@@ -397,10 +419,13 @@ export default function FloorPlan() {
     return () => {
       cancelAnimationFrame(rafId);
       clearEffects();
-      window.removeEventListener("resize",    onResize);
-      mount.removeEventListener("mousedown",  onMouseDown);
-      mount.removeEventListener("click",      onClick);
-      mount.removeEventListener("mousemove",  onMouseMove);
+      if (inactivityTimer) clearTimeout(inactivityTimer);
+      window.removeEventListener("resize",      onResize);
+      mount.removeEventListener("mousedown",    onMouseDown);
+      mount.removeEventListener("click",        onClick);
+      mount.removeEventListener("mousemove",    onMouseMove);
+      mount.removeEventListener("pointerdown",  onUserActivity);
+      mount.removeEventListener("wheel",        onUserActivity);
       mount.removeChild(renderer.domElement);
       renderer.dispose();
     };
