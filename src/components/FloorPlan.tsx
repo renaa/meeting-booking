@@ -224,7 +224,7 @@ export default function FloorPlan() {
     window.addEventListener("resize", onResize);
 
     // ── GLB load ─────────────────────────────────────────────────────────────
-    new GLTFLoader().load(`${import.meta.env.BASE_URL}nova-house-extruded.glb`, (gltf) => {
+    new GLTFLoader().load(`${import.meta.env.BASE_URL.replace(/\/$/, "")}/nova-house-extruded.glb`, (gltf) => {
       // Apply materials before reparenting so parent-chain colour lookup works.
       let meshIdx = 0;
       gltf.scene.traverse((obj) => {
