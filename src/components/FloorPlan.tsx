@@ -6,10 +6,38 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 // One colour per floor, keyed by the _wN group name (case-insensitive).
 // Add or change entries here as you add floors in Blender.
 const FLOOR_PALETTE: Record<string, number> = {
-  _w2: 0xe8735a, // floor 2 — coral
-  _w3: 0x4a9e8a, // floor 3 — teal
-  _w4: 0xd4a84b, // floor 4 — gold
-  _w5: 0x7b6eb0, // floor 5 — lavender
+  // exterior walls
+  _w2: 0x8a9ba8, 
+  _w3: 0x8a9ba8, 
+  _w4: 0x8a9ba8, 
+  _w5: 0x8a9ba8, 
+
+  // floor 2 rooms
+  ALFA:  0xCD5C5C,
+  BETA: 0x556B2F,
+  VEGA: 0x4682B4,
+  EPSILON: 0xD2691E,
+  SIRIUS: 0xF0E68C ,  
+  WOLF: 0x9370DB,  
+
+  // floor 3 rooms
+  HUBBLE : 0xCD5C5C,
+  WEBB:  0x556B2F,
+  NEW_HORIZONS: 0x4682B4,
+  SKYLAB: 0xD2691E,
+  ORION:  0xF0E68C, 
+
+  // floor 4 rooms
+  GRAVITY: 0x9370DB, 
+  THE_HITCHIKER : 0xCD5C5C, 
+  INTERSTELLAR : 0x556B2F, 
+  STAR_WARS : 0x4682B4, 
+
+  // floor 5 rooms
+  METAL: 0x7f8c8d,  
+  WOOL:   0xf5f5dc,
+  TERRAZO: 0x95a5a6,
+  LEATHER: 0xc27c0e,
 };
 const FALLBACK_COLOR = 0x8a9ba8;
 
@@ -17,7 +45,9 @@ const FALLBACK_COLOR = 0x8a9ba8;
 function floorColor(obj: THREE.Object3D): number {
   let node: THREE.Object3D | null = obj;
   while (node) {
-    const color = FLOOR_PALETTE[node.name.toLowerCase()];
+    const color = FLOOR_PALETTE[node.name];
+    
+    console.log(node.name, color);
     if (color !== undefined) return color;
     node = node.parent;
   }
